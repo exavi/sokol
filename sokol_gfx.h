@@ -20117,6 +20117,7 @@ _SOKOL_PRIVATE VkImageUsageFlags _sg_vk_image_usage(const sg_image_usage* usg) {
     }
     if (usg->color_attachment || usg->resolve_attachment) {
         res |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        res |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
     if (usg->depth_stencil_attachment) {
         res |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
