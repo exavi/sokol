@@ -1,5 +1,79 @@
 ## Updates
 
+### 13-Apr-2026
+
+- sokol_audio.h emscripten: added handling for the WebAudio 'interrupted'
+  state (Safari specific behaviour). The sokol_audio.h code which handled
+  WebAudio suspend/resume could be confused if the audio context goes into
+  the so far unknown state 'interrupted'.
+
+  More details in the PR: https://github.com/floooh/sokol/pull/1479
+
+- sokol_gfx.h: update pixel format cababilities for most backends:
+  - GL 4.3+: the pixel format compute read/write flags have been updated
+    according the table in the glBindImageTexture documentation:
+    https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBindImageTexture.xhtml
+  - GLES 3.1+: same, but for the pixel format table in
+    https://registry.khronos.org/OpenGL-Refpages/es3/html/glBindImageTexture.xhtml
+  - Metal: the pixel format compute read/write flags have been updated
+    according to https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+    (with the caveat that some limits of older iOS device GPUs are ignored - specifically A8 to A10).
+  - WebGPU: pixel format caps have been updated with the optional features
+    provided by the extensions `float32-blendable` and `texture-formats-tier1`
+    and `texture-formats-tier2`
+  - Vulkan: pixel format caps initialization has been rewritten from a hardwired table
+    to querying caps dynamically (similar to the D3D11 backend)
+  - D3D11: no changes, this was already querying all pixel format caps via the API
+
+- sokol_app.h wgpu: the sokol-app WebGPU backend now requests the optional
+  extensions `shader-f16`, `float32-blendable` and `texture-formats-tier2`
+  (`texture-formats-tier1` is not specifically requested because it is included
+  in `tier2`).
+
+PR: https://github.com/floooh/sokol/pull/1476
+related ticket: https://github.com/floooh/sokol/issues/1473
+
+### 08-Apr-2026
+
+Some minor code cleanup in sokol_audio.h:
+
+- sokol_audio.h macos/ios: the config option `SAUDIO_OSX_USE_SYSTEM_HEADERS`
+  and embedded AudioToolbox interface declarations have been removed, instead
+  the AudioToolbox header is now always included, this was a workaround for
+  an ancient Zig issue (https://github.com/ziglang/zig/issues/8360) which had
+  been fixed for a long time
+- sokol_audio.h windows: a new setup config item `saudio_desc.win32.skip_coinitialize`.
+  When this is set to true in the `saudio_setup()` call, sokol_audio.h will
+  not call `CoInitializeEx` and `CoUninitialize` instead the library user is
+  responsible for initializing COM. See https://github.com/floooh/sokol/issues/1398
+  for when that might be useful.
+
+PR: https://github.com/floooh/sokol/pull/1474
+
+### 06-Apr-2026
+
+- sokol_app.h win32+d3d11+gl: minimizing the window no longer causes the framebuffer
+  size to be reset to 1x1 pixels, and also no longer sends a resize-event to
+  the sokol-app event callback. This behaviour is consistent with other
+  platforms and doesn't cause Dear ImGui windows to be piled up in the top-left
+  corner. Note that behaviour for the experimental Vulkan backend is unchanged,
+  and minimizing the window currently causes a panic with Vulkan on Windows
+  (separately tracked via https://github.com/floooh/sokol/issues/1470).
+
+  Issue: https://github.com/floooh/sokol/issues/1465
+  PR: https://github.com/floooh/sokol/pull/1469
+
+- sokol_app.h win32: dpi-awareness code cleanup:
+  - the process is now always set to 'dpi aware' in the D3D11 backend, not only
+    when `sapp_desc.high_dpi` is set to true (for the GL and Vulkan backend, the
+    process is still set to dpi-unaware when the sokol_app.h is initialized without
+    `sapp_desc.high_dpi` so that window-system upscaling works)
+  - a `WM_DPICHANGED` message no longer triggers an assert when dpi-awareness had
+    already been initialized outside sokol_app.h (e.g via manifest.xml), fixes
+    https://github.com/floooh/sokol/issues/1369
+
+  PR: https://github.com/floooh/sokol/pull/1471
+
 ### 03-Apr-2026:
 
 - sokol_gfx.h: add support for the 10/10/10/2-bit packed, signed vertex

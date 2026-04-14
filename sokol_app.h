@@ -1863,7 +1863,7 @@ typedef enum sapp_pixel_format {
     SAPP_PIXELFORMAT_SBGRA8,
     SAPP_PIXELFORMAT_DEPTH,
     SAPP_PIXELFORMAT_DEPTH_STENCIL,
-    _SA_PPPIXELFORMAT_FORCE_U32 = 0x7FFFFFFF
+    _SAPP_PIXELFORMAT_FORCE_U32 = 0x7FFFFFFF
 } sapp_pixel_format;
 
 /*
@@ -2565,7 +2565,7 @@ typedef struct {
             uint64_t start;
         } mach;
     #elif defined(_SAPP_EMSCRIPTEN)
-        // empty
+        int _dummy;
     #elif defined(_SAPP_WIN32)
         struct {
             LARGE_INTEGER freq;
@@ -4103,13 +4103,25 @@ _SOKOL_PRIVATE void _sapp_wgpu_create_device_and_swapchain(void) {
         SOKOL_ASSERT(cur_feature_index < _SAPP_WGPU_MAX_REQUESTED_FEATURES);
         requiredFeatures[cur_feature_index++] = WGPUFeatureName_TextureCompressionASTC;
     }
+    if (wgpuAdapterHasFeature(_sapp.wgpu.adapter, WGPUFeatureName_DualSourceBlending)) {
+        SOKOL_ASSERT(cur_feature_index < _SAPP_WGPU_MAX_REQUESTED_FEATURES);
+        requiredFeatures[cur_feature_index++] = WGPUFeatureName_DualSourceBlending;
+    }
+    if (wgpuAdapterHasFeature(_sapp.wgpu.adapter, WGPUFeatureName_ShaderF16)) {
+        SOKOL_ASSERT(cur_feature_index < _SAPP_WGPU_MAX_REQUESTED_FEATURES);
+        requiredFeatures[cur_feature_index++] = WGPUFeatureName_ShaderF16;
+    }
     if (wgpuAdapterHasFeature(_sapp.wgpu.adapter, WGPUFeatureName_Float32Filterable)) {
         SOKOL_ASSERT(cur_feature_index < _SAPP_WGPU_MAX_REQUESTED_FEATURES);
         requiredFeatures[cur_feature_index++] = WGPUFeatureName_Float32Filterable;
     }
-    if (wgpuAdapterHasFeature(_sapp.wgpu.adapter, WGPUFeatureName_DualSourceBlending)) {
+    if (wgpuAdapterHasFeature(_sapp.wgpu.adapter, WGPUFeatureName_Float32Blendable)) {
         SOKOL_ASSERT(cur_feature_index < _SAPP_WGPU_MAX_REQUESTED_FEATURES);
-        requiredFeatures[cur_feature_index++] = WGPUFeatureName_DualSourceBlending;
+        requiredFeatures[cur_feature_index++] = WGPUFeatureName_Float32Blendable;
+    }
+    if (wgpuAdapterHasFeature(_sapp.wgpu.adapter, WGPUFeatureName_TextureFormatsTier2)) {
+        SOKOL_ASSERT(cur_feature_index < _SAPP_WGPU_MAX_REQUESTED_FEATURES);
+        requiredFeatures[cur_feature_index++] = WGPUFeatureName_TextureFormatsTier2;
     }
     #undef _SAPP_WGPU_MAX_REQUESTED_FEATURES
 
@@ -6160,7 +6172,7 @@ static void _sapp_gl_make_current(void) {
     _sapp_macos_mouse_update_from_nsevent(event, false);
     if (2 == event.buttonNumber) {
         _sapp_macos_mouse_event(SAPP_EVENTTYPE_MOUSE_UP, SAPP_MOUSEBUTTON_MIDDLE, _sapp_macos_mods(event));
-        _sapp.macos.mouse_buttons &= (1<<SAPP_MOUSEBUTTON_MIDDLE);
+        _sapp.macos.mouse_buttons &= ~(1<<SAPP_MOUSEBUTTON_MIDDLE);
     }
 }
 - (void)otherMouseDragged:(NSEvent*)event {
@@ -6700,6 +6712,11 @@ _SOKOL_PRIVATE void _sapp_ios_show_keyboard(bool shown) {
 - (void)sceneWillResignActive:(UIScene*)scene {
     if (!_sapp.ios.suspended) {
         _sapp.ios.suspended = true;
+        #if defined(SOKOL_METAL)
+        if (nil != _sapp.ios.mtl.display_link) {
+            _sapp.ios.mtl.display_link.paused = YES;
+        }
+        #endif
         _sapp_ios_app_event(SAPP_EVENTTYPE_SUSPENDED);
     }
 }
@@ -6707,6 +6724,11 @@ _SOKOL_PRIVATE void _sapp_ios_show_keyboard(bool shown) {
 - (void)sceneDidBecomeActive:(UIScene*)scene {
     if (_sapp.ios.suspended) {
         _sapp.ios.suspended = false;
+        #if defined(SOKOL_METAL)
+        if (nil != _sapp.ios.mtl.display_link) {
+            _sapp.ios.mtl.display_link.paused = NO;
+        }
+        #endif
         _sapp_ios_app_event(SAPP_EVENTTYPE_RESUMED);
     }
 }
@@ -7195,6 +7217,8 @@ _SOKOL_PRIVATE void _sapp_emsc_update_cursor(sapp_mouse_cursor cursor, bool show
     sapp_js_set_cursor((int)cursor, shown ? 1 : 0, custom_cursor ? 1 : 0);
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdollar-in-identifier-extension"
 EM_JS(void, sapp_js_make_custom_mouse_cursor, (int cursor_slot_idx, int width, int height, const void* pixels_ptr, int hotspot_x, int hotspot_y), {
     // encode the cursor pixels into a BMP which then is encoded into an 'object url'
     const bmp_hdr_size = 14;
@@ -7266,6 +7290,7 @@ EM_JS(void, sapp_js_make_custom_mouse_cursor, (int cursor_slot_idx, int width, i
     Module.__sapp_custom_cursors[cursor_slot_idx] = cursor_slot;
 })
 
+#pragma GCC diagnostic pop
 EM_JS(void, sapp_js_destroy_custom_mouse_cursor, (int cursor_slot_idx), {
     if (Module.__sapp_custom_cursors) {
         const cursor = Module.__sapp_custom_cursors[cursor_slot_idx];
@@ -8978,6 +9003,12 @@ _SOKOL_PRIVATE bool _sapp_win32_update_dimensions(void) {
     if (GetClientRect(_sapp.win32.hwnd, &rect)) {
         float window_width = (float)(rect.right - rect.left) / _sapp.win32.dpi.window_scale;
         float window_height = (float)(rect.bottom - rect.top) / _sapp.win32.dpi.window_scale;
+        if ((window_width == 0.0f) && (window_height == 0.0f)) {
+            // both width and height being zero means the window is minimized, in that
+            // case pretend that the size didn't change (this is consistent with other
+            // window systems) - also see: https://github.com/floooh/sokol/issues/1465
+            return false;
+        }
         _sapp.window_width = _sapp_roundf_gzero(window_width);
         _sapp.window_height = _sapp_roundf_gzero(window_height);
         // NOTE: on Vulkan, updating the framebuffer dimensions and firing the resize-event
@@ -9374,11 +9405,9 @@ _SOKOL_PRIVATE void _sapp_win32_char_event(uint32_t c, bool repeat) {
 }
 
 _SOKOL_PRIVATE void _sapp_win32_dpi_changed(HWND hWnd, LPRECT proposed_win_rect) {
-    /* called on WM_DPICHANGED, which will only be sent to the application
-        if sapp_desc.high_dpi is true and the Windows version is recent enough
-        to support DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-    */
-    SOKOL_ASSERT(_sapp.desc.high_dpi);
+    if (!_sapp.win32.dpi.aware) {
+        return;
+    }
     HINSTANCE user32 = LoadLibraryA("user32.dll");
     if (!user32) {
         return;
@@ -9387,10 +9416,15 @@ _SOKOL_PRIVATE void _sapp_win32_dpi_changed(HWND hWnd, LPRECT proposed_win_rect)
     GETDPIFORWINDOW_T fn_getdpiforwindow = (GETDPIFORWINDOW_T)(void*)GetProcAddress(user32, "GetDpiForWindow");
     if (fn_getdpiforwindow) {
         UINT dpix = fn_getdpiforwindow(_sapp.win32.hwnd);
-        // NOTE: for high-dpi apps, mouse_scale remains one
         _sapp.win32.dpi.window_scale = (float)dpix / 96.0f;
-        _sapp.win32.dpi.content_scale = _sapp.win32.dpi.window_scale;
-        _sapp.dpi_scale = _sapp.win32.dpi.window_scale;
+        if (_sapp.desc.high_dpi) {
+            _sapp.win32.dpi.content_scale = _sapp.win32.dpi.window_scale;
+            _sapp.win32.dpi.mouse_scale = 1.0f;
+        } else {
+            _sapp.win32.dpi.content_scale = 1.0f;
+            _sapp.win32.dpi.mouse_scale = 1.0f / _sapp.win32.dpi.window_scale;
+        }
+        _sapp.dpi_scale = _sapp.win32.dpi.content_scale;
         SetWindowPos(hWnd, 0,
             proposed_win_rect->left,
             proposed_win_rect->top,
@@ -9815,28 +9849,33 @@ _SOKOL_PRIVATE void _sapp_win32_init_dpi(void) {
         to newest. SetProcessDpiAwarenessContext() is required for the new
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 method.
     */
-    if (fn_setprocessdpiawareness) {
-        if (_sapp.desc.high_dpi) {
-            /* app requests HighDPI rendering, first try the Win10 Creator Update per-monitor-dpi awareness,
-               if that fails, fall back to system-dpi-awareness
-            */
+    bool init_dpi_awareness = true;
+    #if !defined(SOKOL_D3D11)
+        // special case for GL and Vulkan: if no high-dpi is requested, need to set the
+        // process to dpi-unaware, so that Windows takes care of upscaling
+        if (!_sapp.desc.high_dpi) {
+            _sapp.win32.dpi.aware = false;
+            fn_setprocessdpiawareness(PROCESS_DPI_UNAWARE);
+            init_dpi_awareness = false;
+        }
+    #endif
+    if (init_dpi_awareness) {
+        if (fn_setprocessdpiawareness) {
+            // first try the Win10 Creator Update per-monitor-dpi awareness, if that fails, fall back to system-dpi-awareness
+            // NOTE: if DPI awareness had already been set otherwise (e.g. via manifest.xml) both calls will fail
             _sapp.win32.dpi.aware = true;
             DPI_AWARENESS_CONTEXT_T per_monitor_aware_v2 = (DPI_AWARENESS_CONTEXT_T)-4;
             if (!(fn_setprocessdpiawarenesscontext && fn_setprocessdpiawarenesscontext(per_monitor_aware_v2))) {
                 // fallback to system-dpi-aware
                 fn_setprocessdpiawareness(PROCESS_SYSTEM_DPI_AWARE);
             }
-        } else {
-            /* if the app didn't request HighDPI rendering, let Windows do the upscaling */
-            _sapp.win32.dpi.aware = false;
-            fn_setprocessdpiawareness(PROCESS_DPI_UNAWARE);
+        } else if (fn_setprocessdpiaware) {
+            // fallback for Windows 7
+            _sapp.win32.dpi.aware = true;
+            fn_setprocessdpiaware();
         }
-    } else if (fn_setprocessdpiaware) {
-        // fallback for Windows 7
-        _sapp.win32.dpi.aware = true;
-        fn_setprocessdpiaware();
     }
-    /* get dpi scale factor for main monitor */
+    // get dpi scale factor for main monitor
     if (fn_getdpiformonitor && _sapp.win32.dpi.aware) {
         POINT pt = { 1, 1 };
         HMONITOR hm = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -9844,7 +9883,7 @@ _SOKOL_PRIVATE void _sapp_win32_init_dpi(void) {
         HRESULT hr = fn_getdpiformonitor(hm, MDT_EFFECTIVE_DPI, &dpix, &dpiy);
         _SOKOL_UNUSED(hr);
         SOKOL_ASSERT(SUCCEEDED(hr));
-        /* clamp window scale to an integer factor */
+        // clamp window scale to an integer factor
         _sapp.win32.dpi.window_scale = (float)dpix / 96.0f;
     } else {
         _sapp.win32.dpi.window_scale = 1.0f;
@@ -12076,8 +12115,8 @@ _SOKOL_PRIVATE void _sapp_x11_init_keytable(void) {
                 continue;
             }
             for (int j = 0; j < num_keymap_items; j++) {
-                if (strncmp(desc->names->key_aliases[i].alias, keymap[i].name, XkbKeyNameLength) == 0) {
-                    key = keymap[i].key;
+                if (strncmp(desc->names->key_aliases[i].alias, keymap[j].name, XkbKeyNameLength) == 0) {
+                    key = keymap[j].key;
                     break;
                 }
             }
@@ -12525,7 +12564,7 @@ _SOKOL_PRIVATE void _sapp_x11_create_standard_cursors(void) {
     _sapp_x11_create_standard_cursor(SAPP_MOUSECURSOR_RESIZE_NWSE, "nwse-resize", cursor_theme, size, 0);
     _sapp_x11_create_standard_cursor(SAPP_MOUSECURSOR_RESIZE_NESW, "nesw-resize", cursor_theme, size, 0);
     _sapp_x11_create_standard_cursor(SAPP_MOUSECURSOR_RESIZE_ALL, "all-scroll", cursor_theme, size, XC_fleur);
-    _sapp_x11_create_standard_cursor(SAPP_MOUSECURSOR_NOT_ALLOWED, "no-allowed", cursor_theme, size, 0);
+    _sapp_x11_create_standard_cursor(SAPP_MOUSECURSOR_NOT_ALLOWED, "not-allowed", cursor_theme, size, 0);
     _sapp_x11_create_hidden_cursor();
 }
 
