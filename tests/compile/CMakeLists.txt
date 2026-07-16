@@ -16,6 +16,7 @@ set(c_sources
     sokol_color.c
     sokol_spine.c
     sokol_log.c
+    sokol_letterbox.c
     sokol_main.c)
 if (NOT ANDROID)
     set(c_sources ${c_sources} sokol_fetch.c)
@@ -38,6 +39,7 @@ set(cxx_sources
     sokol_color.cc
     sokol_spine.cc
     sokol_log.cc
+    sokol_letterbox.cc
     sokol_main.cc)
 if (NOT ANDROID)
     set(cxx_sources ${cxx_sources} sokol_fetch.cc)
@@ -45,14 +47,18 @@ endif()
 
 if (ANDROID)
     add_library(sokol-compiletest-c SHARED ${c_sources})
+    add_library(sokol-compiletest-c-all SHARED sokol_all.c sokol_main.c)
 else()
     add_executable(sokol-compiletest-c ${exe_type} ${c_sources})
+    add_executable(sokol-compiletest-c-all ${exe_type} sokol_all.c sokol_main.c)
     add_executable(sokol-compiletest-nosokolapp-c sokol_gfx.c sokol_imgui_nosokolapp.c sokol_nuklear_nosokolapp.c)
     target_link_libraries(sokol-compiletest-nosokolapp-c PUBLIC imgui nuklear)
     configure_c(sokol-compiletest-nosokolapp-c)
 endif()
 target_link_libraries(sokol-compiletest-c PUBLIC imgui nuklear spine)
+target_link_libraries(sokol-compiletest-c-all PUBLIC imgui nuklear spine)
 configure_c(sokol-compiletest-c)
+configure_c(sokol-compiletest-c-all)
 
 if (ANDROID)
     add_library(sokol-compiletest-cxx SHARED ${cxx_sources})

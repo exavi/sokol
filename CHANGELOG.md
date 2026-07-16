@@ -1,5 +1,331 @@
 ## Updates
 
+### 15-Jul-2026
+
+sokol_app.h android: added a platform-specific 'native' event callback
+which allows to intercept *all* Android events. See PR https://github.com/floooh/sokol/pull/1551
+for details. Many thanks to @jasonfrowe!
+
+### 08-Jul-2026
+
+sokol_gfx.h gl/gles3: harmonize internal format of depth-stencil textures
+with the other backends to `GL_DEPTH32F_STENCIL8`, **NOTE** though that unlike
+other backends this only affects depth-stencil textures created via sokol_gfx.h,
+the swapchain framebuffers created via sokol_app.h are still limited to
+D24/S8 (this is because the WGL/GLX/NSOpenGL glue libraries don't allow
+to explicitly request a floating point depth buffer).
+
+PR: https://github.com/floooh/sokol/pull/1548
+
+### 07-Jul-2026
+
+sokol_app.h + sokol_gfx.h d3d11: a small udpate which harmonizes the internal
+pixel format for depth-stencil buffers with the Metal, Vulkan and WebGPU backends
+(the internal format has been changed from `DXGI_FORMAT_D24_UNORM_S8_UINT` to
+`DXGI_FORMAT_D32_FLOAT_S8X24_UINT`, e.g. 32-bit float for depth and 8-bit uint
+for stencil). Note that the GL backends currently still use a 24/8 bit
+depth-stencil format.
+
+PR: https://github.com/floooh/sokol/pull/1545
+
+### 02-Jul-2026
+
+The 'advanced swapchain configuration update'!
+
+New sokol_app.h features:
+
+- Better depth-buffer control: it's now finally possible to configure the
+  swapchain without depth buffer, or with a depth buffer without
+  stencil component via the new `sapp_desc.depth_format` struct member. This can
+  be set to `SAPP_PIXELFORMAT_NONE` (no depth buffer),
+  `SAPP_PIXELFORMAT_DEPTH` (depth-only buffer) or
+  `SAPP_PIXELFORMAT_DEPTH_STENCIL` (depth-stencil buffer). The default is
+  `SAPP_PIXELFORMAT_DEPTH` (**NOTE**: previously the default was to create
+  a depth-stencil buffer, so this might be a breaking change for you).
+- SRGB framebuffer support: it's now possible to request an SRGB framebuffer via
+  `sapp_desc.srgb`, this works on all platforms and backends except WebGL2.
+- Experimental HDR support: `sapp_desc.hdr` allows to request an HDR framebuffer.
+  Currently this is only implemented for WebGPU and macOS/iOS+Metal. HDR mode
+  means that the window system glue is configured to display HDR content,
+  and that the framebuffer is using an unnormalized RGBA16F pixel format.
+- Composite mode: allows to request a transparent framebuffer via
+  `sapp_desc.composite_mode = SAPP_COMPOSITEMODE_PREMULTIPLIED`. This is mainly
+  useful on the web to render on top of a webpage. On native platforms currently
+  only macOS+Metal is supported for rendering a transparent window on top of the
+  desktop background.
+- Disable vsync: on some plaform/backend combos it's now possible to disable
+  vsync-throttling via (`sapp_desc.disable_vsync`), this is currently mainly
+  intended as debugging feature to check how fast the per-frame code runs without
+  vsync-throttling.  Disabling vsync is not currently supported on macOS, iOS,
+  Android and the web (mainly because disabling vsync would require a separate
+  code path in those cases, or in case of macOS+GL the feature simply being
+  broken in the GL driver). In the future this will probably be replaced with a proper
+  'presentation mode enum', but this is also tricky because the features and
+  capabilities differ drastically between the various window system glues.
+
+Other sokol_app.h changes and notes:
+
+- A new `sapp_pixel_format` item has been added: `SAPP_PIXELFORMAT_RGBA16F` (used
+  for HDR framebuffers)
+- A new `sapp_composite_mode` enum has been added with two items: `SAPP_COMPOSITEMODE_OPAQUE`
+  and `SAPP_COMPOSITEMODE_PREMULTIPLIED`
+- A new nested struct `sapp_desc.metal` has been added with a boolean `disable_display_sync`.
+  This is wired to `CAMetalLayer.displaySyncEnabled`. Setting `sapp_desc.metal.disable_display_sync` to
+  true has the effect that `CAMetalLayer` doesn't wait for vsync to present the current frame,
+  however vsync-throttling is still in effect via `CADisplayLink` (I spent a couple of days
+  experimenting with removing CADisplayLink, since theoretically it's redundant when CAMetalLayer
+  waits for vsync anyway, but this resulted in a much more jittery frame pacing). Still, disabling
+  `CAMetalLayer.displaySyncEnabled` seems to slightly reduce input-to-screen latency so it
+  made sense to add this very specialized configuration option.
+- **BREAKING**: the `sapp_desc.alpha` struct member has been removed and replaced with `sapp_desc.composite_mode`
+- **BREAKING**: the `sapp_desc.html5.premultiplied_alpha;` struct member has been replaced in favour of `sapp_desc.composite_mode`
+- **BREAKING**: the function `sapp_get_swapchain()` has been renamed to `sapp_acquire_swapchain()`
+  (the new name makes it clearer that this function is only supposed to be called once per
+  frame). Note though that the sokol_glue.h function `sglue_swapchain()` keeps its name, so
+  if you use sokol_app.h together with sokol_glue.h, no code changes are needed
+- Internal code cleanup: the Metal-specific code in the macOS/iOS backends has been unified
+- On macOS+Metal, calling `sapp_acquire_swapchain()` now returns an 'invalid swapchain'
+  when the window is obscured. This then causes all rendering operations in the
+  sokol-gfx swapchain-pass to be skipped (or you may decide to skip the entire pass
+  in the first place by looking at the returned `sapp_swapchain.invalid` boolean)
+- **NOTE**: the `CoreGraphics` framework must now be linked when building for iOS+Metal
+- **NOTE**: on Emscripten+WebGPU be aware of this new-found issue in emdawnwebgpu:
+  https://issues.chromium.org/issues/529689760 (TL;DR: disable the Closure pass for now
+  until this is fixed - it only affects the new experimental HDR feature though)
+- **NOTE**: when vsync is disabled, `sapp_frame_duration()` will return the
+  **unfiltered** frame duration, this is because on some platform/backend combos
+  running with vsync disabled results in very erratic frame pacing (e.g. occasional
+  'long frames' where the frame duration jump from sub-millisecond to multiple milliseconds).
+- **NOTE**: on macOS with the GL backend, `swap_interval` and `disable_vsync` are
+  without effect. This seems to be a bug in the macOS GL implementation going
+  back to macOS 13.
+
+Changes in sokol_gfx.h
+
+- the missing pixel format `SG_PIXELFORMAT_SBGR8A8` has been added (the SRGB variant of BGRA8)
+- two new validation layer checks have been added when creating a `sg_pipeline` object
+  which check that certain depth states are compatible with the expected depth buffer configuration
+  (those trigger when no depth buffer exists but the pipeline state expects one)
+- srgb-related bugfix in the D3D11 backend: MSAA resolve failed in `sg_end_pass()` when
+  rendering into an SRGB+MSAA render attachment
+- new deprecation warnings for Intel Mac specific Metal features in the macOS 27 SDK
+  have been silenced via `#pragma clang diagnostic ignored "-Wno-deprecated-declarations"`
+
+Notable changes in other sokol headers:
+
+- sokol_imgui.h now applies a 'counter-gamma-correction' when rendering into
+  an SRGB framebuffer (this is detected by first looking at `simgui_desc.color_format`,
+  and when this is the default value by looking at `sg_query_desc().environment.defaults.color_format`)
+- in sokol_audio.h an iOS deprecation warning in the iOS 27 SDK about `AVAudioSessionInterruptionType`
+  has been silenced
+
+New and updated sokol samples (note: WebGPU browser support required):
+
+- [srgb-sapp](https://floooh.github.io/sokol-webgpu/srgb-sapp.html): the 'Hello Triangle' into an SRGB framebuffer
+- [srgb-msaa-sapp](https://floooh.github.io/sokol-webgpu/srgb-msaa-sapp.html): same but into an SRGB+MSAA framebuffer
+- [srgb-offscreen-sapp](https://floooh.github.io/sokol-webgpu/srgb-offscreen-sapp.html): test rendering into an
+  SRGB framebuffer with and without MSAA
+- [compositemode-sapp](https://floooh.github.io/sokol-webgpu/compositemode-sapp.html): render a transparent canvas
+  on top of other content (in this case: wikipedia loaded into an iframe), also works on native macOS+Metal just
+  without the webpage (instead the desktop is peaking through)
+- [hdr-sapp](https://floooh.github.io/sokol-webgpu/hdr-sapp.html): test the new HDR framebuffer feature
+  (only tested on Chrome+WebGPU and native macOS+Metal on my MBP)
+- most 2D sokol samples are now configured without a depth buffer (note that sokol_gl.h currently requires
+  a depth buffer even when only rendering 2D content)
+
+PR link: https://github.com/floooh/sokol/pull/1520
+
+### 11-Jun-2026
+
+- sokol_app.h linux: fixed a long-standing bug in the sokol-app Linux backend
+  where `sapp_get_clipboard_string()` returned a null pointer instead of an
+  empty string when the clipboard is empty or when an error occurs while
+  querying the clipboard.
+
+  Issue: https://github.com/floooh/sokol/issues/1538
+  PR: https://github.com/floooh/sokol/pull/1539
+
+  Many thanks to @OrfeasPliaridis for reporting the problem!
+
+### 05-Jun-2026
+
+- sokol_app.h android: Update the default framebuffer config from 16-bit
+  depth buffer and no stencil buffer to 24/8 depth-stencil buffer. Also
+  correctly setup multisampling.
+
+  Issue: https://github.com/floooh/sokol/issues/1530
+  PR: https://github.com/floooh/sokol/pull/1531
+
+  Many thanks to @stark26583 for the identifying the issue and providing
+  the initial PR!
+
+### 29-May-2026
+
+- sokol_app.h macos: don't disable 'mouse event coalescing' (coalescing merges
+  high frequency mouse-move events into low frequency events). Coalescing was
+  disabled in March 2021 in an attempt to *reduce* mouse lag, but with high
+  frequency mice this might actually have the opposite effect and introduce
+  extreme mouse lag by flooding the event queue with 'raw' mouse move events (at
+  least this is a current theory, also neither GLFW nor SDL have coalescing
+  disabled, so I guess it's the right thing to do)
+
+  Related ticket: https://github.com/floooh/sokol/issues/1344
+
+  Commit: https://github.com/floooh/sokol/commit/4ad893e4cccb983d431d106547fed2ee42b6b232
+
+### 28-May-2026
+
+Please be aware of the following bug reports and fixes in recent days:
+
+- sokol_gfx.h gl: a `&` vs `&=` confusion when tracking storage image
+  memory barrier bits
+  - Issue: https://github.com/floooh/sokol/issues/1521
+  - Fix: https://github.com/floooh/sokol/commit/1dd48f8614a0044228e4ad5dd70d03a444566195
+- sokol_gfx.h: `texture` vs `storageTexture` confusion when initializing storage
+  image BindGroupLayoutEntry, also in the same PR is a bugfix for the
+  `glBindImageTexture` call in the GL backend (I misunderstood the purpose
+  of the `layered` argument):
+  - Issue: https://github.com/floooh/sokol/issues/1522
+  - Fix: https://github.com/floooh/sokol/issues/1525
+- sokol-shdc: added a missing `#include` when runtime reflection functions
+  are code-generated:
+  - Issue: https://github.com/floooh/sokol-tools/issues/216
+  - Fix: https://github.com/floooh/sokol-tools/pull/217
+
+Many thanks to @mattiasljungstrom, @oyisre and @erincatto for the reports, investigations
+and suggested fixes!
+
+### 24-May-2026
+
+- sokol_app.h vulkan: Properly fix the situation when
+  `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` returns a width and height of zero.
+  This is for instance the case when minimizing the application window on Windows.
+  The Intel Vulkan driver refuses to create a swapchain object in that case
+  (previously resulting in a triggered assert), while the Nvidia Vulkan driver
+  happily creates a zero-sized swapchain object and image objects (there are
+  validation layer errors though). In this situation, sokol_app.h will now go into
+  an 'invalid swapchain state' until the window is deminimized. This builds on top
+  of the recent introduction of 'invalid swapchain passes' in sokol-gfx (such an
+  invalid swapchain pass silently skips all rendering operations).
+
+  Please note that the Vulkan backend should still be considered 'experimental'
+  (especially on Windows).
+
+  PR: https://github.com/floooh/sokol/pull/1518
+
+### 21-May-2026
+
+- sokol_imgui.h: fix for removal of the deprecated `ImDrawCallback_ResetRenderState`
+  magic value (only an issue when building with `IMGUI_DISABLE_OBSOLETE_FUNCTIONS`).
+
+  Original issue which introduced the magic value check: https://github.com/floooh/sokol/issues/1000
+  New issue with the breakage report: https://github.com/floooh/sokol/issues/1514
+  Fix PR: https://github.com/floooh/sokol/pull/1515
+
+### 11-May-2026
+
+- A new header `sokol_framebuffer.h` has been added which provides a 'CPU framebuffer'
+  in 32-bits-per-pixel direct-color mode or 8-bits-per-pixel color-palette mode
+  (Mode13H-style).
+
+  Implementation PR: https://github.com/floooh/sokol/pull/1495
+
+  New samples:
+    - [framebuffer-sapp.c](https://floooh.github.io/sokol-html5/framebuffer-sapp.html): a 'simplest possible' example
+    - [ilbm-sapp.c](https://floooh.github.io/sokol-html5/ilbm-sapp.html): load and display Amiga IFF ILBM images
+
+  The following side-projects have also been moved to sokol_framebuffer.h (see the
+  sokol_framebuffer.h implementation PR for links to the side-project PRs):
+    - [Doom on Sokol](https://floooh.github.io/doom-sokol/)
+    - [Tiny Emulators](https://floooh.github.io/tiny8bit/)
+
+### 04-May-2026
+
+- sokol_app.h android: The sokol-app Android backend now uses the Choreographer
+  API (if available) for frame pacing and for the frame duration (which has
+  much less jitter, similar to CADisplayLink on macOS/iOS).
+
+  Many thanks to @learnopengles for the PR!
+
+  Issue: https://github.com/floooh/sokol/issues/1502
+  PR: https://github.com/floooh/sokol/pull/1503
+
+### 01-May-2026
+
+- sokol_app.h macos: Move `activationPolicy` in front of window
+  creation. This fixes the edge case that when the app is built as 'bare'
+  cmdline executable (e.g. not as a macOS app bundle with Info.plist file),
+  and the exe is started from a fullscreen terminal, the application window
+  would be opened on the same screen as the fullscreen app before visibility
+  and control switches to the desktop screen (but leaving the app window
+  on the now hidden terminal screen). Moving activationPolicy before
+  window creation fixes the behaviour and makes it identical with app bundles
+  (visibility and focus switch to the desktop screen first, then the window
+  is opened on the desktop screen).
+
+  Many thanks to @johannesmono for reporting the issue and suggesting the
+  correct solution!
+
+  Issue: https://github.com/floooh/sokol/issues/1500
+  PR: https://github.com/floooh/sokol/pull/1501
+
+### 26-Apr-2026
+
+A new code-generation script has been added which compiles and injects the embedded
+shaders into sokol headers. This is a purely internal change which reduces
+manual work on my side when the embedded shaders need to be updated. There shouldn't
+be any observable differences when using the sokol headers.
+
+The affected headers are: sokol_gl.h, sokol_debugtext.h, sokol_fontstash.h,
+sokol_imgui.h, sokol_nuklear.h and sokol_spine.h
+
+PR: https://github.com/floooh/sokol/pull/1496
+
+### 25-Apr-2026
+
+- Please take note of this [sokol-shdc update](https://github.com/floooh/sokol-tools/blob/master/CHANGELOG.md#25-apr-2026)
+  (only affects WGSL code generation).
+
+### 21-Apr-2026
+
+- Added a new header [sokol_letterbox.h](util/sokol_letterbox.h), this is just
+  a single helper function which returns viewport parameters to render
+  fixed-aspect-ratio content in a variable-aspect-ratio window (something that
+  I found myself using in pretty much all my toy projects). The header is standalone and can
+  be used with any rendering API that has a function to set the viewport rectangle.
+
+  See the [letterbox-sapp.c WASM sample and example code](https://floooh.github.io/sokol-html5/letterbox-sapp.html)
+  to understand the feature set.
+
+  PR: https://github.com/floooh/sokol/pull/1491
+
+### 20-Apr-2026
+
+- fix various warts in the language bindings generator scripts which
+  reduces manual overhead for adding new headers to the bindings
+  (small breaking change in the sokol-zig bindings: the module `sgimgui`
+  has been renamed to `gfximgui` and the module `sappimgui` to `appimgui`)
+
+  Ticket: https://github.com/floooh/sokol/issues/1489
+  PR: https://github.com/floooh/sokol/pull/1490
+
+### 19-Apr-2026
+
+- sokol_gfx.h: swapchain render-passes can now be marked as 'invalid' via the
+  new boolean `sg_swapchain.invalid`. When this flag is set to true, all other
+  struct members must be zeroed, and sokol-gfx will silently skip all rendering
+  operations in this pass. The purpose of the flag is to communicate to sokol-gfx
+  that the external swapchain handling code cannot provide valid rendering
+  surfaces, or that rendering to this swapchain needs to be skipped for other
+  reasons. On its own the sokol-gfx feature isn't useful, it needs coordination
+  with the external swapchain code (without this coordination, the external swapchain
+  code may still keep presenting the swapchain, causing flicker)
+- sokol_gfx.h vulkan: missing validation for Vulkan swapchain resources has
+  been added to the validation layer in the `sg_begin_pass()` call
+
+  Ticket: https://github.com/floooh/sokol/issues/1480
+  PR: https://github.com/floooh/sokol/pull/1482
+
 ### 13-Apr-2026
 
 - sokol_audio.h emscripten: added handling for the WebAudio 'interrupted'

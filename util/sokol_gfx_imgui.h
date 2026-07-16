@@ -1288,6 +1288,7 @@ _SOKOL_PRIVATE const char* _sgimgui_pixelformat_string(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA8UI: return "RGBA8UI";
         case SG_PIXELFORMAT_RGBA8SI: return "RGBA8SI";
         case SG_PIXELFORMAT_BGRA8: return "BGRA8";
+        case SG_PIXELFORMAT_SBGR8A8: return "SBGR8A8";
         case SG_PIXELFORMAT_RGB10A2: return "RGB10A2";
         case SG_PIXELFORMAT_RG11B10F: return "RG11B10F";
         case SG_PIXELFORMAT_RG32UI: return "RG32UI";
@@ -3237,7 +3238,9 @@ _SOKOL_PRIVATE void _sgimgui_draw_image(_sgimgui_t* ctx, sg_image img, float* op
             sg_image view_img = sg_query_view_image(view_ui->res_id);
             if (view_img.id == img.id) {
                 // FIXME: once texture views can have a separate image type, check this instead
-                const bool image_renderable = (sg_query_image_type(view_img) == SG_IMAGETYPE_2D) && (sg_query_image_sample_count(view_img) == 1);
+                const bool image_renderable = (sg_query_image_type(view_img) == SG_IMAGETYPE_2D)
+                    && (sg_query_image_sample_count(view_img) == 1)
+                    && sg_query_pixelformat(sg_query_image_pixelformat(view_img)).filter;
                 if (image_renderable) {
                     view = view_ui->res_id;
                     break;

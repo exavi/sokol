@@ -558,6 +558,12 @@
                   rendering goes into
                 - an optional MTLTexture for the depth/stencil buffer
 
+    A sg_swapchain struct provided to sg_begin_pass() can indicate that the
+    swapchain is in an 'invalid state' via the boolean `sg_swapchain.invalid`.
+    When this flag is set, all other sg_swapchain members must be zeroed.
+    An invalid swapchain will cause all rendering operations in that pass
+    to be silently skipped.
+
     It's recommended that you create a helper function which returns an
     initialized sg_swapchain struct by value. This can then be directly plugged
     into the sg_begin_pass function like this:
@@ -2147,6 +2153,7 @@ typedef enum sg_pixel_format {
     SG_PIXELFORMAT_RGBA8UI,
     SG_PIXELFORMAT_RGBA8SI,
     SG_PIXELFORMAT_BGRA8,
+    SG_PIXELFORMAT_SBGR8A8,
     SG_PIXELFORMAT_RGB10A2,
     SG_PIXELFORMAT_RG11B10F,
     SG_PIXELFORMAT_RGB9E5,
@@ -2894,7 +2901,14 @@ typedef struct sg_pass_action {
 
     The width and height *must* be > 0.
 
-    Additionally the following backend API specific objects must be passed in
+    The boolean `sg_swapchain.invalid` is used to communicate an invalid
+    swapchain state to sokol-gfx (for instance the swapchain code outside of
+    sokol-gfx not being able to create swapchain surfaces). When the .invalid
+    boolean is set to true, all other sg_swapchain struct items must be zeroed
+    (checked in the validation layer), and all rendering in this swapchain-pass
+    will be silently skipped.
+
+    For valid swapchains, the following backend API specific objects must be passed in
     as 'type erased' void pointers:
 
     GL:
@@ -2974,6 +2988,7 @@ typedef struct sg_gl_swapchain {
 } sg_gl_swapchain;
 
 typedef struct sg_swapchain {
+    bool invalid;
     int width;
     int height;
     int sample_count;
@@ -3283,9 +3298,9 @@ typedef struct sg_buffer_desc {
         the image content cannot be updated from the CPU side
         (but may be updated by the GPU in a render- or compute-pass)
     .dynamic_update (default: false)
-        the image content is updated infrequently by the CPU
+        the image content is updated infrequently by the CPU via sg_update_image()
     .stream_update (default: false)
-        the image content is updated each frame by the CPU via
+        the image content is updated each frame by the CPU via sg_update_image()
 
     Note that creating a texture view from the image to be used for
     texture-sampling in vertex-, fragment- or compute-shaders
@@ -4639,6 +4654,8 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(VALIDATE_PIPELINEDESC_SHADER_READONLY_STORAGEBUFFERS, "sg_pipeline_desc.shader: only readonly storage buffer bindings allowed in render pipelines") \
     _SG_LOGITEM_XMACRO(VALIDATE_PIPELINEDESC_BLENDOP_MINMAX_REQUIRES_BLENDFACTOR_ONE, "SG_BLENDOP_MIN/MAX requires all blend factors to be SG_BLENDFACTOR_ONE") \
     _SG_LOGITEM_XMACRO(VALIDATE_PIPELINEDESC_DUAL_SOURCE_BLENDING_NOT_SUPPORTED, "dual source blending not supported (sg_features.dual_source_blending)") \
+    _SG_LOGITEM_XMACRO(VALIDATE_PIPELINEDESC_DEPTH_FORMAT_NONE_BUT_DEPTH_WRITE_ENABLED, "sg_pipeline_desc.depth.write_enabled cannot be true when sg_pipeline_desc.depth.pixel_format is SG_PIXELFORMAT_NONE") \
+    _SG_LOGITEM_XMACRO(VALIDATE_PIPELINEDESC_DEPTH_FORMAT_NONE_COMPARE_FUNC_MISMATCH, "sg_pipeline_desc.depth.compare must be SG_COMPAREFUNC_ALWAYS or SG_COMPAREFUNC_NEVER when sg_pipeline_desc.pixel_format is SG_PIXELFORMAT_NONE") \
     _SG_LOGITEM_XMACRO(VALIDATE_VIEWDESC_CANARY, "sg_view_desc not initialized") \
     _SG_LOGITEM_XMACRO(VALIDATE_VIEWDESC_UNIQUE_VIEWTYPE, "sg_view_desc: only one view type can be active") \
     _SG_LOGITEM_XMACRO(VALIDATE_VIEWDESC_ANY_VIEWTYPE, "sg_view_desc: exactly one view type must be active") \
@@ -4696,6 +4713,22 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_WGPU_EXPECT_DEPTHSTENCILVIEW, "sg_begin_pass: expected pass.swapchain.wgpu.depth_stencil_view != 0") \
     _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_WGPU_EXPECT_DEPTHSTENCILVIEW_NOTSET, "sg_begin_pass: expected pass.swapchain.wgpu.depth_stencil_view == 0") \
     _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_GL_EXPECT_FRAMEBUFFER_NOTSET, "sg_begin_pass: expected pass.swapchain.gl.framebuffer == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERIMAGE, "sg_begin_pass: expected pass.swapchain.vk.render_image != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERIMAGE_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.render_image == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERVIEW, "sg_begin_pass: expected pass.swapchain.vk.render_view != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERVIEW_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.render_view == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILIMAGE, "sg_begin_pass: expected pass.swapchain.vk.depth_stencil_image != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILIMAGE_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.depth_stencil_image == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILVIEW, "sg_begin_pass: expected pass.swapchain.vk.depth_stencil_view != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILVIEW_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.depth_stencil_view == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEIMAGE, "sg_begin_pass: expected pass.swapchain.vk.resolve_image != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEIMAGE_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.resolve_image == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEVIEW, "sg_begin_pass: expected pass.swapchain.vk.resolve_view != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEVIEW_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.resolve_view == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERFINISHEDSEMAPHORE, "sg_begin_pass: expected pass.swapchain.vk.render_finished_semaphore != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERFINISHEDSEMAPHORE_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.render_finished_semaphore == 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_PRESENTCOMPLETESEMAPHORE, "sg_begin_pass: expected pass.swapchain.vk.present_complete_semaphore != 0") \
+    _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_PRESENTCOMPLETESEMAPHORE_NOTSET, "sg_begin_pass: expected pass.swapchain.vk.present_complete_semaphore == 0") \
     _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_COLORATTACHMENTVIEWS_CONTINUOUS, "sg_begin_pass: color attachment view array must be continuous") \
     _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_COLORATTACHMENTVIEW_ALIVE, "sg_begin_pass: color attachment view no longer alive") \
     _SG_LOGITEM_XMACRO(VALIDATE_BEGINPASS_COLORATTACHMENTVIEW_VALID, "sg_begin_pass: color attachment view not in valid state (SG_RESOURCESTATE_VALID)") \
@@ -5596,11 +5629,18 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
             #ifndef GL_SILENCE_DEPRECATION
                 #define GL_SILENCE_DEPRECATION
             #endif
-            #if defined(TARGET_OS_IPHONE) && !TARGET_OS_IPHONE
-                #include <OpenGL/gl3.h>
+            #ifndef GLES_SILENCE_DEPRECATION
+                #define GLES_SILENCE_DEPRECATION
+            #endif
+            #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+                #if defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST
+                    #include <OpenGL/gl3.h>
+                #else
+                    #include <OpenGLES/ES3/gl.h>
+                    #include <OpenGLES/ES3/glext.h>
+                #endif
             #else
-                #include <OpenGLES/ES3/gl.h>
-                #include <OpenGLES/ES3/glext.h>
+                #include <OpenGL/gl3.h>
             #endif
         #elif defined(__EMSCRIPTEN__)
             #if defined(SOKOL_GLES3)
@@ -5641,12 +5681,18 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
             #define _SOKOL_GL_HAS_BASEVERTEX (1)
         #endif
     #elif defined(__APPLE__)
-        #if defined(TARGET_OS_IPHONE) && !TARGET_OS_IPHONE
+        #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+            #if defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST
+                #define _SOKOL_GL_HAS_COLORMASKI (1)
+                #define _SOKOL_GL_HAS_BASEVERTEX (1)
+                #define _SOKOL_GL_HAS_DUALSOURCEBLENDING (1)
+            #else
+                #define _SOKOL_GL_HAS_TEXSTORAGE (1)
+            #endif
+        #else
             #define _SOKOL_GL_HAS_COLORMASKI (1)
             #define _SOKOL_GL_HAS_BASEVERTEX (1)
             #define _SOKOL_GL_HAS_DUALSOURCEBLENDING (1)
-        #else
-            #define _SOKOL_GL_HAS_TEXSTORAGE (1)
         #endif
     #elif defined(__EMSCRIPTEN__)
         #define _SOKOL_GL_HAS_TEXSTORAGE (1)
@@ -5946,6 +5992,8 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
         #define GL_MAX_TEXTURE_IMAGE_UNITS 0x8872
         #define GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS 0x90DD
         #define GL_MAX_IMAGE_UNITS 0x8F38
+        #define GL_FLOAT_32_UNSIGNED_INT_24_8_REV 0x8DAD
+        #define GL_DEPTH32F_STENCIL8 0x8CAD
     #endif
 
     #ifndef GL_UNSIGNED_INT_2_10_10_10_REV
@@ -7252,6 +7300,7 @@ typedef struct {
         sg_attachments atts;
         sg_pass_action action;
         struct {
+            bool invalid;
             sg_pixel_format color_fmt;
             sg_pixel_format depth_fmt;
             int sample_count;
@@ -8583,6 +8632,16 @@ _SOKOL_PRIVATE bool _sg_is_depth_stencil_format(sg_pixel_format fmt) {
     return (SG_PIXELFORMAT_DEPTH_STENCIL == fmt);
 }
 
+_SOKOL_PRIVATE bool _sg_is_srgb_format(sg_pixel_format fmt) {
+    switch (fmt) {
+        case SG_PIXELFORMAT_SRGB8A8:
+        case SG_PIXELFORMAT_SBGR8A8:
+            return true;
+        default:
+            return false;
+    }
+}
+
 _SOKOL_PRIVATE int _sg_pixelformat_bytesize(sg_pixel_format fmt) {
     switch (fmt) {
         case SG_PIXELFORMAT_R8:
@@ -8614,6 +8673,7 @@ _SOKOL_PRIVATE int _sg_pixelformat_bytesize(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA8UI:
         case SG_PIXELFORMAT_RGBA8SI:
         case SG_PIXELFORMAT_BGRA8:
+        case SG_PIXELFORMAT_SBGR8A8:
         case SG_PIXELFORMAT_RGB10A2:
         case SG_PIXELFORMAT_RG11B10F:
         case SG_PIXELFORMAT_RGB9E5:
@@ -9556,7 +9616,7 @@ _SOKOL_PRIVATE GLenum _sg_gl_teximage_type(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_DEPTH:
             return GL_FLOAT;
         case SG_PIXELFORMAT_DEPTH_STENCIL:
-            return GL_UNSIGNED_INT_24_8;
+            return GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
         default:
             SOKOL_UNREACHABLE; return 0;
     }
@@ -9715,7 +9775,7 @@ _SOKOL_PRIVATE GLenum _sg_gl_teximage_internal_format(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA32SI:   return GL_RGBA32I;
         case SG_PIXELFORMAT_RGBA32F:    return GL_RGBA32F;
         case SG_PIXELFORMAT_DEPTH:      return GL_DEPTH_COMPONENT32F;
-        case SG_PIXELFORMAT_DEPTH_STENCIL:      return GL_DEPTH24_STENCIL8;
+        case SG_PIXELFORMAT_DEPTH_STENCIL:      return GL_DEPTH32F_STENCIL8;
         case SG_PIXELFORMAT_BC1_RGBA:           return GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
         case SG_PIXELFORMAT_BC2_RGBA:           return GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
         case SG_PIXELFORMAT_BC3_RGBA:           return GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
@@ -9786,6 +9846,7 @@ _SOKOL_PRIVATE void _sg_gl_init_pixelformats(bool has_bgra) {
     _sg_pixelformat_srm(&_sg.formats[SG_PIXELFORMAT_RGBA8SI]);
     if (has_bgra) {
         _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_BGRA8]);
+        _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_SBGR8A8]);
     }
     _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_RGB10A2]);
     _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_RGB9E5]);
@@ -11385,7 +11446,7 @@ _SOKOL_PRIVATE void _sg_gl_handle_memory_barriers(const _sg_shader_t* shd, const
                 }
             } else if (view->cmn.type == SG_VIEWTYPE_STORAGEIMAGE) {
                 _sg_image_t* img = _sg_image_ref_ptr(&view->cmn.img.ref);
-                if (img->gl.gpu_dirty_flags &= _SG_GL_GPUDIRTY_STORAGEIMAGE) {
+                if (img->gl.gpu_dirty_flags & _SG_GL_GPUDIRTY_STORAGEIMAGE) {
                     gl_barrier_bits |= GL_SHADER_IMAGE_ACCESS_BARRIER_BIT;
                     img->gl.gpu_dirty_flags &= (uint8_t)~_SG_GL_GPUDIRTY_STORAGEIMAGE;
                 }
@@ -11450,13 +11511,6 @@ _SOKOL_PRIVATE void _sg_gl_begin_pass(const sg_pass* pass, const _sg_attachments
     const bool is_offscreen_pass = !atts->empty;
 
     // bind the render pass framebuffer
-    //
-    // FIXME: Disabling SRGB conversion for the default framebuffer is
-    // a crude hack to make behaviour for sRGB render target textures
-    // identical with the Metal and D3D11 swapchains created by sokol-app.
-    //
-    // This will need a cleaner solution (e.g. allowing to configure
-    // sokol_app.h with an sRGB or RGB framebuffer.
     if (is_offscreen_pass) {
 
         // offscreen pass, mutate the global offscreen framebuffer object
@@ -11524,7 +11578,11 @@ _SOKOL_PRIVATE void _sg_gl_begin_pass(const sg_pass* pass, const _sg_attachments
     } else {
         // swapchain pass
         #if defined(SOKOL_GLCORE)
-        glDisable(GL_FRAMEBUFFER_SRGB);
+        if (_sg_is_srgb_format(swapchain->color_format)) {
+            glEnable(GL_FRAMEBUFFER_SRGB);
+        } else {
+            glDisable(GL_FRAMEBUFFER_SRGB);
+        }
         #endif
         // NOTE: on some platforms, the default framebuffer of a context
         // is null, so we can't actually assert here that the
@@ -11972,7 +12030,9 @@ _SOKOL_PRIVATE bool _sg_gl_apply_bindings(_sg_bindings_ptrs_t* bnd) {
                 GLuint gl_tex = img->gl.tex[img->cmn.active_slot];
                 GLint level = (GLint)view->cmn.img.mip_level;
                 GLint layer = (GLint)view->cmn.img.slice;
-                GLboolean layered = shd->cmn.views[i].image_type != SG_IMAGETYPE_2D;
+                // NOTE: when picking a specific layer, the 'layered' flag must be false,
+                // this was previously bugged
+                GLboolean layered = GL_FALSE;
                 GLenum access = shd->cmn.views[i].simg_writeonly ? GL_WRITE_ONLY : GL_READ_WRITE;
                 GLenum format = _sg_gl_teximage_internal_format(shd->cmn.views[i].access_format);
                 // NOTE: we specifically don't go through the GL cache since storage images
@@ -12804,7 +12864,7 @@ _SOKOL_PRIVATE UINT _sg_d3d11_buffer_cpu_access_flags(const sg_buffer_usage* usg
     return usg->immutable ? 0 : D3D11_CPU_ACCESS_WRITE;
 }
 
-_SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_texture_pixel_format(sg_pixel_format fmt) {
+_SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_base_pixel_format(sg_pixel_format fmt) {
     switch (fmt) {
         case SG_PIXELFORMAT_R8:             return DXGI_FORMAT_R8_UNORM;
         case SG_PIXELFORMAT_R8SN:           return DXGI_FORMAT_R8_SNORM;
@@ -12833,6 +12893,7 @@ _SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_texture_pixel_format(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA8UI:        return DXGI_FORMAT_R8G8B8A8_UINT;
         case SG_PIXELFORMAT_RGBA8SI:        return DXGI_FORMAT_R8G8B8A8_SINT;
         case SG_PIXELFORMAT_BGRA8:          return DXGI_FORMAT_B8G8R8A8_UNORM;
+        case SG_PIXELFORMAT_SBGR8A8:        return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
         case SG_PIXELFORMAT_RGB10A2:        return DXGI_FORMAT_R10G10B10A2_UNORM;
         case SG_PIXELFORMAT_RG11B10F:       return DXGI_FORMAT_R11G11B10_FLOAT;
         case SG_PIXELFORMAT_RGB9E5:         return DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
@@ -12848,7 +12909,7 @@ _SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_texture_pixel_format(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA32SI:       return DXGI_FORMAT_R32G32B32A32_SINT;
         case SG_PIXELFORMAT_RGBA32F:        return DXGI_FORMAT_R32G32B32A32_FLOAT;
         case SG_PIXELFORMAT_DEPTH:          return DXGI_FORMAT_R32_TYPELESS;
-        case SG_PIXELFORMAT_DEPTH_STENCIL:  return DXGI_FORMAT_R24G8_TYPELESS;
+        case SG_PIXELFORMAT_DEPTH_STENCIL:  return DXGI_FORMAT_R32G8X24_TYPELESS;
         case SG_PIXELFORMAT_BC1_RGBA:       return DXGI_FORMAT_BC1_UNORM;
         case SG_PIXELFORMAT_BC2_RGBA:       return DXGI_FORMAT_BC2_UNORM;
         case SG_PIXELFORMAT_BC3_RGBA:       return DXGI_FORMAT_BC3_UNORM;
@@ -12865,13 +12926,23 @@ _SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_texture_pixel_format(sg_pixel_format fmt) {
     };
 }
 
+_SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_texture_pixel_format(sg_pixel_format fmt) {
+    if (fmt == SG_PIXELFORMAT_SRGB8A8) {
+        return DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    } else if (fmt == SG_PIXELFORMAT_SBGR8A8) {
+        return DXGI_FORMAT_B8G8R8A8_TYPELESS;
+    } else {
+        return _sg_d3d11_base_pixel_format(fmt);
+    }
+}
+
 _SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_srv_pixel_format(sg_pixel_format fmt) {
     if (fmt == SG_PIXELFORMAT_DEPTH) {
         return DXGI_FORMAT_R32_FLOAT;
     } else if (fmt == SG_PIXELFORMAT_DEPTH_STENCIL) {
-        return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+        return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
     } else {
-        return _sg_d3d11_texture_pixel_format(fmt);
+        return _sg_d3d11_base_pixel_format(fmt);
     }
 }
 
@@ -12879,9 +12950,9 @@ _SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_dsv_pixel_format(sg_pixel_format fmt) {
     if (fmt == SG_PIXELFORMAT_DEPTH) {
         return DXGI_FORMAT_D32_FLOAT;
     } else if (fmt == SG_PIXELFORMAT_DEPTH_STENCIL) {
-        return DXGI_FORMAT_D24_UNORM_S8_UINT;
+        return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     } else {
-        return _sg_d3d11_texture_pixel_format(fmt);
+        return _sg_d3d11_base_pixel_format(fmt);
     }
 }
 
@@ -12889,9 +12960,9 @@ _SOKOL_PRIVATE DXGI_FORMAT _sg_d3d11_rtv_uav_pixel_format(sg_pixel_format fmt) {
     if (fmt == SG_PIXELFORMAT_DEPTH) {
         return DXGI_FORMAT_R32_FLOAT;
     } else if (fmt == SG_PIXELFORMAT_DEPTH_STENCIL) {
-        return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+        return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
     } else {
-        return _sg_d3d11_texture_pixel_format(fmt);
+        return _sg_d3d11_base_pixel_format(fmt);
     }
 }
 
@@ -14191,7 +14262,7 @@ _SOKOL_PRIVATE void _sg_d3d11_end_pass(const _sg_attachments_ptrs_t* atts) {
                         dst_subres,
                         color_img->d3d11.res,
                         src_subres,
-                        color_img->d3d11.format);
+                        _sg_d3d11_rtv_uav_pixel_format(color_img->cmn.pixel_format));
                     _sg_stats_inc(d3d11.pass.num_resolve_subresource);
                 }
             }
@@ -14564,6 +14635,9 @@ _SOKOL_PRIVATE void _sg_d3d11_update_image(_sg_image_t* img, const sg_image_data
 //
 // >>metal backend
 #elif defined(SOKOL_METAL)
+#pragma clang diagnostic push
+// silence Intel Mac deprecations for now
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 #if __has_feature(objc_arc)
 #define _SG_OBJC_RETAIN(obj) { }
@@ -14706,6 +14780,7 @@ _SOKOL_PRIVATE MTLPixelFormat _sg_mtl_pixel_format(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA8UI:                return MTLPixelFormatRGBA8Uint;
         case SG_PIXELFORMAT_RGBA8SI:                return MTLPixelFormatRGBA8Sint;
         case SG_PIXELFORMAT_BGRA8:                  return MTLPixelFormatBGRA8Unorm;
+        case SG_PIXELFORMAT_SBGR8A8:                return MTLPixelFormatBGRA8Unorm_sRGB;
         case SG_PIXELFORMAT_RGB10A2:                return MTLPixelFormatRGB10A2Unorm;
         case SG_PIXELFORMAT_RG11B10F:               return MTLPixelFormatRG11B10Float;
         case SG_PIXELFORMAT_RGB9E5:                 return MTLPixelFormatRGB9E5Float;
@@ -15165,6 +15240,7 @@ _SOKOL_PRIVATE void _sg_mtl_init_caps(void) {
     _sg_pixelformat_srm(&_sg.formats[SG_PIXELFORMAT_RGBA8UI]);
     _sg_pixelformat_srm(&_sg.formats[SG_PIXELFORMAT_RGBA8SI]);
     _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_BGRA8]);
+    _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_SBGR8A8]);
     _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_RGB10A2]);
     _sg_pixelformat_all(&_sg.formats[SG_PIXELFORMAT_RG11B10F]);
     #if defined(_SG_TARGET_MACOS)
@@ -16247,10 +16323,11 @@ _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
 _SOKOL_PRIVATE void _sg_mtl_commit(void) {
     SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
     SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
-    SOKOL_ASSERT(nil != _sg.mtl.cmd_buffer);
 
     // commit the frame's command buffer
-    [_sg.mtl.cmd_buffer commit];
+    if (_sg.mtl.cmd_buffer) {
+        [_sg.mtl.cmd_buffer commit];
+    }
 
     // garbage-collect resources pending for release
     _sg_mtl_garbage_collect(_sg.frame_index);
@@ -16697,6 +16774,8 @@ _SOKOL_PRIVATE void _sg_mtl_pop_debug_group(void) {
     }
 }
 
+#pragma clang diagnostic pop // Intel Mac deprecations
+
 // ██     ██ ███████ ██████   ██████  ██████  ██    ██     ██████   █████   ██████ ██   ██ ███████ ███    ██ ██████
 // ██     ██ ██      ██   ██ ██       ██   ██ ██    ██     ██   ██ ██   ██ ██      ██  ██  ██      ████   ██ ██   ██
 // ██  █  ██ █████   ██████  ██   ███ ██████  ██    ██     ██████  ███████ ██      █████   █████   ██ ██  ██ ██   ██
@@ -16968,6 +17047,7 @@ _SOKOL_PRIVATE WGPUTextureFormat _sg_wgpu_textureformat(sg_pixel_format p) {
         case SG_PIXELFORMAT_RGBA8UI:        return WGPUTextureFormat_RGBA8Uint;
         case SG_PIXELFORMAT_RGBA8SI:        return WGPUTextureFormat_RGBA8Sint;
         case SG_PIXELFORMAT_BGRA8:          return WGPUTextureFormat_BGRA8Unorm;
+        case SG_PIXELFORMAT_SBGR8A8:        return WGPUTextureFormat_BGRA8UnormSrgb;
         case SG_PIXELFORMAT_RGB10A2:        return WGPUTextureFormat_RGB10A2Unorm;
         case SG_PIXELFORMAT_RG11B10F:       return WGPUTextureFormat_RG11B10Ufloat;
         case SG_PIXELFORMAT_RGB9E5:         return WGPUTextureFormat_RGB9E5Ufloat;
@@ -18267,7 +18347,7 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
                 bgl_entry->storageTexture.access = WGPUStorageTextureAccess_ReadWrite;
             }
             bgl_entry->storageTexture.format = _sg_wgpu_textureformat(shd->cmn.views[i].access_format);
-            bgl_entry->texture.viewDimension = _sg_wgpu_texture_view_dimension(shd->cmn.views[i].image_type);
+            bgl_entry->storageTexture.viewDimension = _sg_wgpu_texture_view_dimension(shd->cmn.views[i].image_type);
         } else {
             SOKOL_UNREACHABLE;
         }
@@ -18631,16 +18711,16 @@ _SOKOL_PRIVATE void _sg_wgpu_end_pass(const _sg_attachments_ptrs_t* atts) {
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_commit(void) {
-    SOKOL_ASSERT(_sg.wgpu.cmd_enc);
-
+    if (!_sg.wgpu.cmd_enc) {
+        // no valid pass in this frame
+        return;
+    }
     _sg_wgpu_uniform_system_on_commit();
-
     _SG_STRUCT(WGPUCommandBufferDescriptor, cmd_buf_desc);
     WGPUCommandBuffer wgpu_cmd_buf = wgpuCommandEncoderFinish(_sg.wgpu.cmd_enc, &cmd_buf_desc);
     SOKOL_ASSERT(wgpu_cmd_buf);
     wgpuCommandEncoderRelease(_sg.wgpu.cmd_enc);
     _sg.wgpu.cmd_enc = 0;
-
     wgpuQueueSubmit(_sg.wgpu.queue, 1, &wgpu_cmd_buf);
     wgpuCommandBufferRelease(wgpu_cmd_buf);
 }
@@ -20247,6 +20327,7 @@ _SOKOL_PRIVATE VkFormat _sg_vk_format(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA8UI:        return VK_FORMAT_R8G8B8A8_UINT;
         case SG_PIXELFORMAT_RGBA8SI:        return VK_FORMAT_R8G8B8A8_SINT;
         case SG_PIXELFORMAT_BGRA8:          return VK_FORMAT_B8G8R8A8_UNORM;
+        case SG_PIXELFORMAT_SBGR8A8:        return VK_FORMAT_B8G8R8A8_SRGB;
         case SG_PIXELFORMAT_RGB10A2:        return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
         case SG_PIXELFORMAT_RG11B10F:       return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
         case SG_PIXELFORMAT_RGB9E5:         return VK_FORMAT_E5B9G9R9_UFLOAT_PACK32;
@@ -21725,8 +21806,9 @@ _SOKOL_PRIVATE void _sg_vk_end_pass(const _sg_attachments_ptrs_t* atts) {
 
 _SOKOL_PRIVATE void _sg_vk_commit(void) {
     SOKOL_ASSERT(_sg.vk.queue);
-    SOKOL_ASSERT(_sg.vk.frame.cmd_buf);
-    _sg_vk_submit_frame_command_buffers();
+    if (_sg.vk.frame.cmd_buf) {
+        _sg_vk_submit_frame_command_buffers();
+    }
     _sg.vk.present_complete_sem = 0;
     _sg.vk.render_finished_sem = 0;
 }
@@ -23016,6 +23098,10 @@ _SOKOL_PRIVATE bool _sg_validate_pipeline_desc(const sg_pipeline_desc* desc) {
                 }
             }
         }
+        if (desc->depth.pixel_format == SG_PIXELFORMAT_NONE) {
+            _SG_VALIDATE(desc->depth.write_enabled == false, VALIDATE_PIPELINEDESC_DEPTH_FORMAT_NONE_BUT_DEPTH_WRITE_ENABLED);
+            _SG_VALIDATE((desc->depth.compare == SG_COMPAREFUNC_ALWAYS) || (desc->depth.compare == SG_COMPAREFUNC_NEVER), VALIDATE_PIPELINEDESC_DEPTH_FORMAT_NONE_COMPARE_FUNC_MISMATCH);
+        }
         for (size_t color_index = 0; color_index < (size_t)desc->color_count; color_index++) {
             SOKOL_ASSERT(color_index < SG_MAX_COLOR_ATTACHMENTS);
             const sg_blend_state* bs = &desc->colors[color_index].blend;
@@ -23196,6 +23282,7 @@ _SOKOL_PRIVATE bool _sg_validate_begin_pass(const sg_pass* pass) {
         if (_sg.desc.disable_validation) {
             return true;
         }
+        const bool is_invalid_swapchain_pass = pass->swapchain.invalid;
         const bool is_compute_pass = pass->compute;
         const bool is_swapchain_pass = !is_compute_pass && _sg_attachments_empty(&pass->attachments);
         const bool is_offscreen_pass = !(is_compute_pass || is_swapchain_pass);
@@ -23204,8 +23291,9 @@ _SOKOL_PRIVATE bool _sg_validate_begin_pass(const sg_pass* pass) {
         _SG_VALIDATE(pass->_end_canary == 0, VALIDATE_BEGINPASS_CANARY);
         if (is_compute_pass) {
             _SG_VALIDATE(_sg_attachments_empty(&pass->attachments), VALIDATE_BEGINPASS_COMPUTEPASS_EXPECT_NO_ATTACHMENTS);
+        } else if (is_invalid_swapchain_pass) {
+            // empty block not a bug, skips to 'swapchain zeroed' validation at the end
         } else if (is_swapchain_pass) {
-            // this is a swapchain pass
             _SG_VALIDATE(pass->swapchain.width > 0, VALIDATE_BEGINPASS_SWAPCHAIN_EXPECT_WIDTH);
             _SG_VALIDATE(pass->swapchain.height > 0, VALIDATE_BEGINPASS_SWAPCHAIN_EXPECT_HEIGHT);
             _SG_VALIDATE(pass->swapchain.sample_count > 0, VALIDATE_BEGINPASS_SWAPCHAIN_EXPECT_SAMPLECOUNT);
@@ -23248,6 +23336,25 @@ _SOKOL_PRIVATE bool _sg_validate_begin_pass(const sg_pass* pass) {
                 } else {
                     _SG_VALIDATE(pass->swapchain.wgpu.resolve_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_WGPU_EXPECT_RESOLVEVIEW_NOTSET);
                 }
+            #elif defined(SOKOL_VULKAN)
+                _SG_VALIDATE(pass->swapchain.vulkan.render_image != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERIMAGE);
+                _SG_VALIDATE(pass->swapchain.vulkan.render_view != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERVIEW);
+                if (pass->swapchain.depth_format == SG_PIXELFORMAT_NONE) {
+                    _SG_VALIDATE(pass->swapchain.vulkan.depth_stencil_image == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILIMAGE_NOTSET);
+                    _SG_VALIDATE(pass->swapchain.vulkan.depth_stencil_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILVIEW_NOTSET);
+                } else {
+                    _SG_VALIDATE(pass->swapchain.vulkan.depth_stencil_image != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILIMAGE);
+                    _SG_VALIDATE(pass->swapchain.vulkan.depth_stencil_view != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILVIEW);
+                }
+                if (pass->swapchain.sample_count > 1) {
+                    _SG_VALIDATE(pass->swapchain.vulkan.resolve_image != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEIMAGE);
+                    _SG_VALIDATE(pass->swapchain.vulkan.resolve_view != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEVIEW);
+                } else {
+                    _SG_VALIDATE(pass->swapchain.vulkan.resolve_image == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEIMAGE_NOTSET);
+                    _SG_VALIDATE(pass->swapchain.vulkan.resolve_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEVIEW_NOTSET);
+                }
+                _SG_VALIDATE(pass->swapchain.vulkan.render_finished_semaphore != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERFINISHEDSEMAPHORE);
+                _SG_VALIDATE(pass->swapchain.vulkan.present_complete_semaphore != 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_PRESENTCOMPLETESEMAPHORE);
             #endif
         } else {
             // this is an 'offscreen pass'
@@ -23353,7 +23460,7 @@ _SOKOL_PRIVATE bool _sg_validate_begin_pass(const sg_pass* pass) {
             // must have at least color- or depth-stencil-attachments
             _SG_VALIDATE(has_color_atts || has_depth_stencil_atts, VALIDATE_BEGINPASS_ATTACHMENTS_EXPECTED);
         }
-        if (is_compute_pass || is_offscreen_pass) {
+        if (is_compute_pass || is_offscreen_pass || is_invalid_swapchain_pass) {
             _SG_VALIDATE(pass->swapchain.width == 0, VALIDATE_BEGINPASS_SWAPCHAIN_EXPECT_WIDTH_NOTSET);
             _SG_VALIDATE(pass->swapchain.height == 0, VALIDATE_BEGINPASS_SWAPCHAIN_EXPECT_HEIGHT_NOTSET);
             _SG_VALIDATE(pass->swapchain.sample_count == 0, VALIDATE_BEGINPASS_SWAPCHAIN_EXPECT_SAMPLECOUNT_NOTSET);
@@ -23373,6 +23480,15 @@ _SOKOL_PRIVATE bool _sg_validate_begin_pass(const sg_pass* pass) {
                 _SG_VALIDATE(pass->swapchain.wgpu.resolve_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_WGPU_EXPECT_RESOLVEVIEW_NOTSET);
             #elif defined(_SOKOL_ANY_GL)
                 _SG_VALIDATE(pass->swapchain.gl.framebuffer == 0, VALIDATE_BEGINPASS_SWAPCHAIN_GL_EXPECT_FRAMEBUFFER_NOTSET);
+            #elif defined(SOKOL_VULKAN)
+                _SG_VALIDATE(pass->swapchain.vulkan.render_image == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERIMAGE_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.render_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERVIEW_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.depth_stencil_image == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILIMAGE_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.depth_stencil_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_DEPTHSTENCILVIEW_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.resolve_image == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEIMAGE_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.resolve_view == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RESOLVEVIEW_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.render_finished_semaphore == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_RENDERFINISHEDSEMAPHORE_NOTSET);
+                _SG_VALIDATE(pass->swapchain.vulkan.present_complete_semaphore == 0, VALIDATE_BEGINPASS_SWAPCHAIN_VULKAN_EXPECT_PRESENTCOMPLETESEMAPHORE_NOTSET);
             #endif
         }
         return _sg_validate_end();
@@ -24609,7 +24725,7 @@ _SOKOL_PRIVATE sg_desc _sg_desc_defaults(const sg_desc* desc) {
 _SOKOL_PRIVATE sg_pass _sg_pass_defaults(const sg_pass* pass) {
     sg_pass res = *pass;
     if (!res.compute) {
-        if (_sg_attachments_empty(&pass->attachments)) {
+        if (!pass->swapchain.invalid && _sg_attachments_empty(&pass->attachments)) {
             // this is a swapchain-pass
             res.swapchain.sample_count = _sg_def(res.swapchain.sample_count, _sg.desc.environment.defaults.sample_count);
             res.swapchain.color_format = _sg_def(res.swapchain.color_format, _sg.desc.environment.defaults.color_format);
@@ -25406,6 +25522,7 @@ SOKOL_API_IMPL void sg_begin_pass(const sg_pass* pass) {
     SOKOL_ASSERT((pass->_start_canary == 0) && (pass->_end_canary == 0));
     _sg.cur_pass.in_pass = true;
     const sg_pass pass_def = _sg_pass_defaults(pass);
+    _SG_TRACE_ARGS(begin_pass, &pass_def);
     if (!_sg_validate_pass_attachment_limits(&pass_def)) {
         return;
     }
@@ -25422,36 +25539,37 @@ SOKOL_API_IMPL void sg_begin_pass(const sg_pass* pass) {
         _sg.cur_pass.dim = _sg_attachments_dim(&atts_ptrs);
     } else if (!pass_def.compute) {
         // a swapchain pass
-        SOKOL_ASSERT(pass_def.swapchain.width > 0);
-        SOKOL_ASSERT(pass_def.swapchain.height > 0);
-        SOKOL_ASSERT(pass_def.swapchain.color_format > SG_PIXELFORMAT_NONE);
-        SOKOL_ASSERT(pass_def.swapchain.sample_count > 0);
-        _sg.cur_pass.dim.width = pass_def.swapchain.width;
-        _sg.cur_pass.dim.height = pass_def.swapchain.height;
+        // NOTE: all values allowed to be zero if swapchain is invalid
+        _sg.cur_pass.swapchain.invalid = pass_def.swapchain.invalid;
         _sg.cur_pass.swapchain.color_fmt = pass_def.swapchain.color_format;
         _sg.cur_pass.swapchain.depth_fmt = pass_def.swapchain.depth_format;
         _sg.cur_pass.swapchain.sample_count = pass_def.swapchain.sample_count;
+        _sg.cur_pass.dim.width = pass_def.swapchain.width;
+        _sg.cur_pass.dim.height = pass_def.swapchain.height;
     }
     _sg.cur_pass.action = pass_def.action;
     _sg.cur_pass.valid = true;  // may be overruled by backend begin-pass functions
     _sg.cur_pass.is_compute = pass_def.compute;
+    if (_sg.cur_pass.swapchain.invalid) {
+        _sg.cur_pass.valid = false;
+        return;
+    }
     _sg_begin_pass(&pass_def, &atts_ptrs);
-    _SG_TRACE_ARGS(begin_pass, &pass_def);
 }
 
 SOKOL_API_IMPL void sg_apply_viewport(int x, int y, int width, int height, bool origin_top_left) {
     SOKOL_ASSERT(_sg.valid);
+    _sg_stats_inc(num_apply_viewport);
+    _SG_TRACE_ARGS(apply_viewport, x, y, width, height, origin_top_left);
+    if (!_sg.cur_pass.valid) {
+        return;
+    }
     #if defined(SOKOL_DEBUG)
     if (!_sg_validate_apply_viewport(x, y, width, height, origin_top_left)) {
         return;
     }
     #endif
-    _sg_stats_inc(num_apply_viewport);
-    if (!_sg.cur_pass.valid) {
-        return;
-    }
     _sg_apply_viewport(x, y, width, height, origin_top_left);
-    _SG_TRACE_ARGS(apply_viewport, x, y, width, height, origin_top_left);
 }
 
 SOKOL_API_IMPL void sg_apply_viewportf(float x, float y, float width, float height, bool origin_top_left) {
@@ -25460,17 +25578,17 @@ SOKOL_API_IMPL void sg_apply_viewportf(float x, float y, float width, float heig
 
 SOKOL_API_IMPL void sg_apply_scissor_rect(int x, int y, int width, int height, bool origin_top_left) {
     SOKOL_ASSERT(_sg.valid);
+    _sg_stats_inc(num_apply_scissor_rect);
+    _SG_TRACE_ARGS(apply_scissor_rect, x, y, width, height, origin_top_left);
+    if (!_sg.cur_pass.valid) {
+        return;
+    }
     #if defined(SOKOL_DEBUG)
     if (!_sg_validate_apply_scissor_rect(x, y, width, height, origin_top_left)) {
         return;
     }
     #endif
-    _sg_stats_inc(num_apply_scissor_rect);
-    if (!_sg.cur_pass.valid) {
-        return;
-    }
     _sg_apply_scissor_rect(x, y, width, height, origin_top_left);
-    _SG_TRACE_ARGS(apply_scissor_rect, x, y, width, height, origin_top_left);
 }
 
 SOKOL_API_IMPL void sg_apply_scissor_rectf(float x, float y, float width, float height, bool origin_top_left) {
@@ -25480,11 +25598,12 @@ SOKOL_API_IMPL void sg_apply_scissor_rectf(float x, float y, float width, float 
 SOKOL_API_IMPL void sg_apply_pipeline(sg_pipeline pip_id) {
     SOKOL_ASSERT(_sg.valid);
     _sg_stats_inc(num_apply_pipeline);
-    if (!_sg_validate_apply_pipeline(pip_id)) {
-        _sg.next_draw_valid = false;
+    _SG_TRACE_ARGS(apply_pipeline, pip_id);
+    if (!_sg.cur_pass.valid) {
         return;
     }
-    if (!_sg.cur_pass.valid) {
+    if (!_sg_validate_apply_pipeline(pip_id)) {
+        _sg.next_draw_valid = false;
         return;
     }
     _sg_pipeline_t* pip = _sg_lookup_pipeline(pip_id.id);
@@ -25504,14 +25623,16 @@ SOKOL_API_IMPL void sg_apply_pipeline(sg_pipeline pip_id) {
     const _sg_shader_t* shd = _sg_shader_ref_ptr(&pip->cmn.shader);
     _sg.required_bindings_and_uniforms = pip->cmn.required_bindings_and_uniforms | shd->cmn.required_bindings_and_uniforms;
     _sg.applied_bindings_and_uniforms = 0;
-
-    _SG_TRACE_ARGS(apply_pipeline, pip_id);
 }
 
 SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
     SOKOL_ASSERT(_sg.valid);
     SOKOL_ASSERT(bindings);
     _sg_stats_inc(num_apply_bindings);
+    _SG_TRACE_ARGS(apply_bindings, bindings);
+    if (!_sg.cur_pass.valid) {
+        return;
+    }
     _sg.applied_bindings_and_uniforms |= (1 << SG_MAX_UNIFORMBLOCK_BINDSLOTS);
     if (!_sg_validate_apply_bindings(bindings)) {
         _sg.next_draw_valid = false;
@@ -25519,9 +25640,6 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
     SOKOL_ASSERT((bindings->_start_canary == 0) && (bindings->_end_canary==0));
     if (!_sg_pipeline_ref_alive(&_sg.cur_pip)) {
         _sg.next_draw_valid = false;
-    }
-    if (!_sg.cur_pass.valid) {
-        return;
     }
     if (!_sg.next_draw_valid) {
         return;
@@ -25572,7 +25690,6 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
 
     if (_sg.next_draw_valid) {
         _sg.next_draw_valid &= _sg_apply_bindings(&bnd);
-        _SG_TRACE_ARGS(apply_bindings, bindings);
     }
 }
 
@@ -25582,19 +25699,19 @@ SOKOL_API_IMPL void sg_apply_uniforms(int ub_slot, const sg_range* data) {
     SOKOL_ASSERT(data && data->ptr && (data->size > 0));
     _sg_stats_inc(num_apply_uniforms);
     _sg_stats_add(size_apply_uniforms, (uint32_t)data->size);
+    _SG_TRACE_ARGS(apply_uniforms, ub_slot, data);
+    if (!_sg.cur_pass.valid) {
+        return;
+    }
     _sg.applied_bindings_and_uniforms |= 1 << ub_slot;
     if (!_sg_validate_apply_uniforms(ub_slot, data)) {
         _sg.next_draw_valid = false;
-        return;
-    }
-    if (!_sg.cur_pass.valid) {
         return;
     }
     if (!_sg.next_draw_valid) {
         return;
     }
     _sg_apply_uniforms(ub_slot, data);
-    _SG_TRACE_ARGS(apply_uniforms, ub_slot, data);
 }
 
 _SOKOL_PRIVATE bool _sg_check_skip_draw(int num_elements, int num_instances) {
@@ -25613,42 +25730,38 @@ _SOKOL_PRIVATE bool _sg_check_skip_draw(int num_elements, int num_instances) {
 
 SOKOL_API_IMPL void sg_draw(int base_element, int num_elements, int num_instances) {
     SOKOL_ASSERT(_sg.valid);
+    _sg_stats_inc(num_draw);
+    _SG_TRACE_ARGS(draw, base_element, num_elements, num_instances);
+    if (_sg_check_skip_draw(num_elements, num_instances)) {
+        return;
+    }
     #if defined(SOKOL_DEBUG)
     if (!_sg_validate_draw(base_element, num_elements, num_instances)) {
         return;
     }
     #endif
-    _sg_stats_inc(num_draw);
-    if (_sg_check_skip_draw(num_elements, num_instances)) {
-        return;
-    }
     _sg_draw(base_element, num_elements, num_instances, 0, 0);
-    _SG_TRACE_ARGS(draw, base_element, num_elements, num_instances);
 }
 
 SOKOL_API_IMPL void sg_draw_ex(int base_element, int num_elements, int num_instances, int base_vertex, int base_instance) {
     SOKOL_ASSERT(_sg.valid);
+    _sg_stats_inc(num_draw_ex);
+    _SG_TRACE_ARGS(draw_ex, base_element, num_elements, num_instances, base_vertex, base_instance);
+    if (_sg_check_skip_draw(num_elements, num_instances)) {
+        return;
+    }
     #if defined(SOKOL_DEBUG)
     if (!_sg_validate_draw_ex(base_element, num_elements, num_instances, base_vertex, base_instance)) {
         return;
     }
     #endif
-    _sg_stats_inc(num_draw_ex);
-    if (_sg_check_skip_draw(num_elements, num_instances)) {
-        return;
-    }
     _sg_draw(base_element, num_elements, num_instances, base_vertex, base_instance);
-    _SG_TRACE_ARGS(draw_ex, base_element, num_elements, num_instances, base_vertex, base_instance);
 }
 
 SOKOL_API_IMPL void sg_dispatch(int num_groups_x, int num_groups_y, int num_groups_z) {
     SOKOL_ASSERT(_sg.valid);
-    #if defined(SOKOL_DEBUG)
-    if (!_sg_validate_dispatch(num_groups_x, num_groups_y, num_groups_z)) {
-        return;
-    }
-    #endif
     _sg_stats_inc(num_dispatch);
+    _SG_TRACE_ARGS(dispatch, num_groups_x, num_groups_y, num_groups_z);
     if (!_sg.cur_pass.valid) {
         return;
     }
@@ -25659,20 +25772,26 @@ SOKOL_API_IMPL void sg_dispatch(int num_groups_x, int num_groups_y, int num_grou
     if ((0 == num_groups_x) || (0 == num_groups_y) || (0 == num_groups_z)) {
         return;
     }
+    #if defined(SOKOL_DEBUG)
+    if (!_sg_validate_dispatch(num_groups_x, num_groups_y, num_groups_z)) {
+        return;
+    }
+    #endif
     _sg_dispatch(num_groups_x, num_groups_y, num_groups_z);
-    _SG_TRACE_ARGS(dispatch, num_groups_x, num_groups_y, num_groups_z);
 }
 
 SOKOL_API_IMPL void sg_end_pass(void) {
     SOKOL_ASSERT(_sg.valid);
     SOKOL_ASSERT(_sg.cur_pass.in_pass);
     _sg_stats_inc(num_passes);
+    _SG_TRACE_NOARGS(end_pass);
     // NOTE: don't exit early if !_sg.cur_pass.valid
-    const _sg_attachments_ptrs_t atts_ptrs = _sg_attachments_ptrs(&_sg.cur_pass.atts);
-    _sg_end_pass(&atts_ptrs);
+    if (!_sg.cur_pass.swapchain.invalid) {
+        const _sg_attachments_ptrs_t atts_ptrs = _sg_attachments_ptrs(&_sg.cur_pass.atts);
+        _sg_end_pass(&atts_ptrs);
+    }
     _sg.cur_pip = _sg_pipeline_ref(0);
     _sg_clear(&_sg.cur_pass, sizeof(_sg.cur_pass));
-    _SG_TRACE_NOARGS(end_pass);
 }
 
 SOKOL_API_IMPL void sg_commit(void) {
