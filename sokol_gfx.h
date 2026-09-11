@@ -19235,6 +19235,8 @@ _SOKOL_PRIVATE void _sg_vk_barrier_on_apply_bindings(VkCommandBuffer cmd_buf, co
     } else {
         // no transitions allowed in render passes, but check if resources are in
         // correct access state
+        // exavi fork: allow writable storage buffer view. No barrier emitted.
+        const _sg_shader_t* shd = bnd->pip ? _sg_shader_ref_ptr(&bnd->pip->cmn.shader) : 0;
         for (size_t i = 0; i < SG_MAX_VERTEXBUFFER_BINDSLOTS; i++) {
             if (bnd->vbs[i]) {
                 SOKOL_ASSERT(0 != (bnd->vbs[i]->vk.cur_access & _SG_VK_ACCESS_VERTEXBUFFER));
@@ -19251,7 +19253,11 @@ _SOKOL_PRIVATE void _sg_vk_barrier_on_apply_bindings(VkCommandBuffer cmd_buf, co
             else if (view->cmn.type == SG_VIEWTYPE_STORAGEBUFFER) {
                 const _sg_buffer_t* buf = _sg_buffer_ref_ptr(&view->cmn.buf.ref);
                 _SOKOL_UNUSED(buf);
+                // exavi fork: allow writable storage buffer view
+                const bool readonly = (0 == shd) || shd->cmn.views[i].sbuf_readonly;
+                if (readonly) {
                 SOKOL_ASSERT(0 != (buf->vk.cur_access & _SG_VK_ACCESS_STORAGEBUFFER_RO));
+                }
             } else if (view->cmn.type == SG_VIEWTYPE_TEXTURE) {
                 const _sg_image_t* img = _sg_image_ref_ptr(&view->cmn.img.ref);
                 _SOKOL_UNUSED(img);
@@ -19681,6 +19687,8 @@ _SOKOL_PRIVATE void _sg_vk_staging_copy_init(void) {
     buf_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buf_create_info.size = _sg.vk.stage.copy.size;
     buf_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    // exavi fork: also a copy destination, for storage-buffer readback
+    buf_create_info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     buf_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     res = vkCreateBuffer(_sg.vk.dev, &buf_create_info, 0, &_sg.vk.stage.copy.buf);
     if (res != VK_SUCCESS) {
@@ -20220,6 +20228,8 @@ _SOKOL_PRIVATE VkBufferUsageFlags _sg_vk_buffer_usage(const sg_buffer_usage* usg
     }
     if (usg->storage_buffer) {
         res |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        // exavi fork: allow GPU > CPU readback
+        res |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     }
     return res;
 }
@@ -23082,12 +23092,20 @@ _SOKOL_PRIVATE bool _sg_validate_pipeline_desc(const sg_pipeline_desc* desc) {
                     _SG_VALIDATE(!_sg_strempty(&shd->d3d11.attrs[attr_index].sem_name), VALIDATE_PIPELINEDESC_ATTR_SEMANTICS);
                     #endif
                 }
+                // exavi fork: Allow Vulkan writable storage buffer view in a
+                // render pipeline. Other backends remain readonly-only as they
+                // can be worked around with the extension. Narrowed it here so
+                // future diffs against mainline sokol result in less changes
+                // and it's clearer which is the gfx api that forced the change
+                // as others side-step the validation.
+                #if !defined(SOKOL_VULKAN)
                 // must only use readonly storage buffer bindings in render pipelines
                 for (size_t i = 0; i < SG_MAX_VIEW_BINDSLOTS; i++) {
                     if (shd->cmn.views[i].view_type == SG_VIEWTYPE_STORAGEBUFFER) {
                         _SG_VALIDATE(shd->cmn.views[i].sbuf_readonly, VALIDATE_PIPELINEDESC_SHADER_READONLY_STORAGEBUFFERS);
                     }
                 }
+                #endif
                 for (int buf_index = 0; buf_index < SG_MAX_VERTEXBUFFER_BINDSLOTS; buf_index++) {
                     const sg_vertex_buffer_layout_state* l_state = &desc->layout.buffers[buf_index];
                     if (l_state->stride == 0) {
@@ -23734,9 +23752,12 @@ _SOKOL_PRIVATE bool _sg_validate_apply_bindings(const sg_bindings* bindings) {
                                 // NOTE: an invalid buffer ref is allowed and skips rendering
                                 if (_sg_buffer_ref_valid(&view->cmn.buf.ref)) {
                                     const _sg_buffer_t* buf = _sg_buffer_ref_ptr(&view->cmn.buf.ref);
+                                    #if !defined(SOKOL_VULKAN)
+                                    // exavi fork: this should be safe to disable the current usage context
                                     if (!shd->cmn.views[i].sbuf_readonly) {
                                         _SG_VALIDATE(buf->cmn.usage.immutable, VALIDATE_ABND_SBVIEW_READWRITE_IMMUTABLE);
                                     }
+                                    #endif
                                 }
                             } else if (shd->cmn.views[i].view_type == SG_VIEWTYPE_STORAGEIMAGE) {
                                 // the view object must be a storage-image-view
