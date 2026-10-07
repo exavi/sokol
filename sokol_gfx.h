@@ -7108,6 +7108,10 @@ typedef struct _sg_shader_s {
         _sg_vk_shader_func_t vertex_func;
         _sg_vk_shader_func_t fragment_func;
         _sg_vk_shader_func_t compute_func;
+        // exavi fork: optional tessellation stages, set by sgext_tess_make_shader_vk
+        _sg_vk_shader_func_t tess_ctrl_func;
+        _sg_vk_shader_func_t tess_eval_func;
+        uint32_t tess_patch_points;
         VkDescriptorSetLayout ub_dsl;
         VkDeviceSize ub_dset_size;
         VkDescriptorSetLayout view_smp_dsl;
@@ -20499,7 +20503,11 @@ _SOKOL_PRIVATE VkColorComponentFlags _sg_vk_color_write_mask(sg_color_mask m) {
 
 _SOKOL_PRIVATE VkShaderStageFlags _sg_vk_shader_stage(sg_shader_stage s) {
     switch (s) {
-        case SG_SHADERSTAGE_VERTEX: return VK_SHADER_STAGE_VERTEX_BIT;
+        case SG_SHADERSTAGE_VERTEX:
+            // tessellation stages see the vertex-stage bindings (exavi fork: sgext_tess)
+            return VK_SHADER_STAGE_VERTEX_BIT
+                | (_sg.vk.dev_features.features.tessellationShader
+                    ? (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) : 0);
         case SG_SHADERSTAGE_FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;
         case SG_SHADERSTAGE_COMPUTE: return VK_SHADER_STAGE_COMPUTE_BIT;
         default: SOKOL_UNREACHABLE; return 0;
@@ -21316,6 +21324,8 @@ _SOKOL_PRIVATE void _sg_vk_discard_shader(_sg_shader_t* shd) {
     _sg_vk_discard_shader_func(&shd->vk.vertex_func);
     _sg_vk_discard_shader_func(&shd->vk.fragment_func);
     _sg_vk_discard_shader_func(&shd->vk.compute_func);
+    _sg_vk_discard_shader_func(&shd->vk.tess_ctrl_func);
+    _sg_vk_discard_shader_func(&shd->vk.tess_eval_func);
     if (shd->vk.pip_layout) {
         _sg_vk_delete_queue_add(_sg_vk_pipelinelayout_destructor, (void*)shd->vk.pip_layout);
         shd->vk.pip_layout = 0;
@@ -21354,12 +21364,25 @@ _SOKOL_PRIVATE sg_resource_state _sg_vk_create_pipeline(_sg_pipeline_t* pip, con
         }
     } else {
         uint32_t num_stages = 0;
-        _SG_STRUCT(VkPipelineShaderStageCreateInfo, stages[2]);
+        _SG_STRUCT(VkPipelineShaderStageCreateInfo, stages[4]);
+        const bool is_tess = shd->vk.tess_eval_func.module != 0;
         if (shd->vk.vertex_func.module) {
             stages[num_stages].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
             stages[num_stages].stage = VK_SHADER_STAGE_VERTEX_BIT;
             stages[num_stages].module = shd->vk.vertex_func.module;
             stages[num_stages].pName = shd->vk.vertex_func.entry.buf;
+            num_stages += 1;
+        }
+        if (is_tess) {
+            stages[num_stages].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[num_stages].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+            stages[num_stages].module = shd->vk.tess_ctrl_func.module;
+            stages[num_stages].pName = shd->vk.tess_ctrl_func.entry.buf;
+            num_stages += 1;
+            stages[num_stages].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[num_stages].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+            stages[num_stages].module = shd->vk.tess_eval_func.module;
+            stages[num_stages].pName = shd->vk.tess_eval_func.entry.buf;
             num_stages += 1;
         }
         if (shd->vk.fragment_func.module) {
@@ -21407,8 +21430,17 @@ _SOKOL_PRIVATE sg_resource_state _sg_vk_create_pipeline(_sg_pipeline_t* pip, con
 
         _SG_STRUCT(VkPipelineInputAssemblyStateCreateInfo, ia_state);
         ia_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        ia_state.topology = _sg_vk_primitive_topology(desc->primitive_type);
+        ia_state.topology = is_tess ? VK_PRIMITIVE_TOPOLOGY_PATCH_LIST : _sg_vk_primitive_topology(desc->primitive_type);
         ia_state.primitiveRestartEnable = VK_FALSE; // FIXME: needs 'primitiveTopologyRestart feature enabled'
+
+        _SG_STRUCT(VkPipelineTessellationStateCreateInfo, tess_state);
+        tess_state.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+        tess_state.patchControlPoints = shd->vk.tess_patch_points;
+        // GL-style domain origin keeps tess coordinates and output winding identical to the other backends
+        _SG_STRUCT(VkPipelineTessellationDomainOriginStateCreateInfo, tess_origin);
+        tess_origin.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO;
+        tess_origin.domainOrigin = VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT;
+        tess_state.pNext = &tess_origin;
 
         _SG_STRUCT(VkPipelineViewportStateCreateInfo, vp_state);
         vp_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -21456,7 +21488,7 @@ _SOKOL_PRIVATE sg_resource_state _sg_vk_create_pipeline(_sg_pipeline_t* pip, con
         ds_state.back.reference = desc->stencil.ref;
 
         _SG_STRUCT(VkPipelineColorBlendAttachmentState, att_states[SG_MAX_COLOR_ATTACHMENTS]);
-        SOKOL_ASSERT(desc->color_count < SG_MAX_COLOR_ATTACHMENTS);
+        SOKOL_ASSERT(desc->color_count <= SG_MAX_COLOR_ATTACHMENTS);
         for (int i = 0; i < desc->color_count; i++) {
             att_states[i].blendEnable = desc->colors[i].blend.enabled;
             att_states[i].srcColorBlendFactor = _sg_vk_blend_factor(desc->colors[i].blend.src_factor_rgb);
@@ -21510,6 +21542,7 @@ _SOKOL_PRIVATE sg_resource_state _sg_vk_create_pipeline(_sg_pipeline_t* pip, con
         pip_create_info.pStages = stages;
         pip_create_info.pVertexInputState = &vi_state;
         pip_create_info.pInputAssemblyState = &ia_state;
+        pip_create_info.pTessellationState = is_tess ? &tess_state : 0;
         pip_create_info.pViewportState = &vp_state;
         pip_create_info.pRasterizationState = &rs_state;
         pip_create_info.pMultisampleState = &ms_state;

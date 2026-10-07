@@ -4612,6 +4612,10 @@ _SOKOL_PRIVATE void _sapp_vk_create_device(void) {
     required.pNext = &vk13_features;
     required.features.samplerAnisotropy = VK_TRUE;
     required.features.dualSrcBlend = VK_TRUE;
+    // exavi fork: needed this to get tessellation working
+    if (supports.features.tessellationShader) {
+        required.features.tessellationShader = VK_TRUE;
+    }
     if (supports.features.textureCompressionBC) {
         required.features.textureCompressionBC = VK_TRUE;
     }
