@@ -20297,6 +20297,7 @@ _SOKOL_PRIVATE VkImageType _sg_vk_image_type(sg_image_type t) {
 
 _SOKOL_PRIVATE VkImageUsageFlags _sg_vk_image_usage(const sg_image_usage* usg) {
     VkImageUsageFlags res = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    res |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // exavi fork: GPU > CPU readback
     res |= VK_IMAGE_USAGE_SAMPLED_BIT;
     if (usg->storage_image) {
         res |= VK_IMAGE_USAGE_STORAGE_BIT;
